@@ -4,17 +4,18 @@
 //Initialize Pins
 IntervalTimer IRsensorTimer;
 IntervalTimer rpmTimer;
-IntervalTimer turnTimer;
 Servo wedgeServo;
 
 //MOTOR A
 int mtrA_PWM_PIN = 4;
 int mtrA_DIR1_PIN = 5;
 int mtrA_DIR2_PIN = 6;
+
 //MOTOR B
 int mtrB_PWM_PIN = 9;
 int mtrB_DIR1_PIN = 7;
 int mtrB_DIR2_PIN = 8;
+
 //SENSORS
 int IR_PIN = 16;
 int RPM_A_PIN = 3;
@@ -22,10 +23,6 @@ int RPM_B_PIN = 2;
 int WEDGE_PIN = 22;
 int LIMIT_LEFT_PIN = 10;
 int LIMIT_RIGHT_PIN = 11;
-int LINE_TOP_LEFT_PIN = 20;
-int LINE_TOP_RIGHT_PIN = 17;
-int LINE_BOT_LEFT_PIN = 19;
-int LINE_BOT_RIGHT_PIN = 18;
 
 //SERVO
 int servoPos = 0;
@@ -38,12 +35,10 @@ int previousReading = 0;
 int IRsensor = 0;
 int edgesA = 0;
 int edgesB = 0;
-int motorADutyCycle;
-int motorBDutyCycle;
-int intervalCount = 0;
 float totalAError = 0;
 float totalBError = 0;
-int trigger = 0;
+int motorADutyCycle;
+int motorBDutyCycle;
 uint32_t endGameTime;
 
 //CONSTANTS
@@ -65,9 +60,6 @@ uint32_t endGameTime;
 #define B_KI_CONSTANT 0.09
 #define MAX_PROPORTION 100
 #define UPPER_IR_BOUND 200
-#define LINE_THRESHOLD 150
-#define TURN_TIME 50000 //unit = microseconds
-#define TURN_DUTY_CYCLE 100
 
 //Functions
 void spinRobot();
@@ -79,7 +71,6 @@ void moveForwardRight();
 void IRsensorReading();
 void dropWedge();
 void pushRightWall();
-void checkLineSensors(); 
 
 void updateRPM();
 void countFallingEdgesA();
@@ -114,10 +105,6 @@ void setup() {
   pinMode(LIMIT_LEFT_PIN, INPUT);
   pinMode(LIMIT_RIGHT_PIN, INPUT);
   pinMode(IR_PIN, INPUT);
-  pinMode(LINE_TOP_LEFT_PIN, INPUT);
-  pinMode(LINE_TOP_RIGHT_PIN, INPUT);
-  pinMode(LINE_BOT_LEFT_PIN, INPUT);
-  pinMode(LINE_BOT_RIGHT_PIN, INPUT);
   pinMode(RPM_A_PIN, INPUT);
   pinMode(RPM_B_PIN, INPUT);
 
@@ -131,6 +118,7 @@ void setup() {
   pinMode(mtrB_DIR2_PIN, OUTPUT);
   analogWriteFrequency(mtrB_PWM_PIN, PWM_FREQ);
 
+  //Speed Ratio makes robot travel in a circle
   motorADutyCycle = DUTY_CYCLE_SPEED;
   motorBDutyCycle = DUTY_CYCLE_SPEED*SPEED_RATIO;
 
@@ -155,9 +143,6 @@ void loop() {
   if (state != ENDED) {
     checkGameEnded();
   }
-  // if (state != TURNING_LEFT && state != TURNING_RIGHT) {
-  //   checkLineSensors();
-  // }
 }
 
 /*Spins robot */
@@ -172,54 +157,30 @@ void spinRobot() {
   analogWrite(mtrB_PWM_PIN, SPIN_CYCLE_SPEED);
 }
 
-void spinRobotLeft() {
-  //spin robot
-  digitalWrite(mtrA_DIR1_PIN, HIGH);
-  digitalWrite(mtrA_DIR2_PIN, LOW);
-  digitalWrite(mtrB_DIR1_PIN, LOW);
-  digitalWrite(mtrB_DIR2_PIN, HIGH);
-  //start motors
-  analogWrite(mtrA_PWM_PIN, TURN_DUTY_CYCLE);
-  analogWrite(mtrB_PWM_PIN, TURN_DUTY_CYCLE);
-}
-
-void spinRobotRight() {
-  //spin robot
-  digitalWrite(mtrA_DIR1_PIN, LOW);
-  digitalWrite(mtrA_DIR2_PIN, HIGH);
-  digitalWrite(mtrB_DIR1_PIN, HIGH);
-  digitalWrite(mtrB_DIR2_PIN, LOW);
-  //start motors
-  analogWrite(mtrA_PWM_PIN, TURN_DUTY_CYCLE);
-  analogWrite(mtrB_PWM_PIN, TURN_DUTY_CYCLE);
-}
-
-/*GAME ENDED*/
+/*Checks if the current time has surpassed the end game time*/
 void checkGameEnded() {
   static uint32_t last = millis();
   if (last > endGameTime) {
     handleGameEnded();
   }
 }
+/*Sets the state to be "ENDED" and stops the motors*/
 void handleGameEnded() {
   state = ENDED;
   analogWrite(mtrB_PWM_PIN, 0);
   analogWrite(mtrA_PWM_PIN, 0);
 }
-/*ORIENTATION*/
+
+/*Reads in the highest signal between the current and previous reading*/
 void IRsensorReading() {
   currentReading = analogRead(IR_PIN);
   IRsensor = abs(currentReading - previousReading);
   previousReading = currentReading;
 }
 
+/*Spins the robot and checks if the IR Sensor has surpassed the set threshold*/
 void handleOrienting() {
   spinRobot();
-  if (trigger == 0) {
-    previousReading = 0;
-    trigger = 1;
-    delay(500);
-  }
   
   if (IRsensor > IR_THRESHOLD && IRsensor < UPPER_IR_BOUND) {
     IRsensorTimer.end();
@@ -227,7 +188,8 @@ void handleOrienting() {
     moveForwardLeft();
   }
 }
-/*LEFT MOTION FUNCTIONS*/
+
+/*Moves the robot left and sets the state to reflect so*/
 void moveForwardLeft() {
   digitalWrite(mtrA_DIR1_PIN, HIGH);
   digitalWrite(mtrA_DIR2_PIN, LOW);
@@ -236,9 +198,9 @@ void moveForwardLeft() {
   analogWrite(mtrA_PWM_PIN, motorADutyCycle);
   analogWrite(mtrB_PWM_PIN, motorBDutyCycle);
   state = MOVING_LEFT;
-  turnTimer.end();
 }
-/*RIGHT MOTION FUNCTIONS*/
+
+/*Moves the robot right and sets the state to reflect so*/
 void moveForwardRight() {
   digitalWrite(mtrA_DIR1_PIN, LOW);
   digitalWrite(mtrA_DIR2_PIN, HIGH);
@@ -247,8 +209,9 @@ void moveForwardRight() {
   analogWrite(mtrA_PWM_PIN, motorADutyCycle);
   analogWrite(mtrB_PWM_PIN, motorBDutyCycle);
   state = MOVING_RIGHT;
-  turnTimer.end();
 }
+
+/*Drops the wedge by lowering the servo motor*/
 void dropWedge() {
   detachInterrupt(digitalPinToInterrupt(LIMIT_LEFT_PIN));
   for(servoPos = initialServoPos; servoPos > finalServoPos; servoPos -= 1) {                               
@@ -258,13 +221,15 @@ void dropWedge() {
   attachInterrupt(digitalPinToInterrupt(LIMIT_RIGHT_PIN), pushRightWall, RISING);
 }
 
+/*Sets the duty cycle for both motors to be 100%*/
 void pushRightWall() {
   analogWrite(mtrA_PWM_PIN, MAX_DUTY_CYCLE);
   analogWrite(mtrB_PWM_PIN, MAX_DUTY_CYCLE);
   state = PUSHING;
-  turnTimer.end();
 }
 
+/*Called every RPM_Interval — updates the duty cycle input based on the rpm output using
+  integral control code */
 void updateRPM() {
   if (state == MOVING_LEFT || state == MOVING_RIGHT) {
     float edges_per_rev = 1/(float)COUNT_PER_REV;
@@ -310,46 +275,17 @@ void updateRPM() {
     edgesB = 0;
 
   }
-  intervalCount++;
-
-  if (intervalCount > (GAME_TIME/RPM_INTERVAL)) {
-    handleGameEnded();
-  }
 }
 
+/*Increases global variable, edgesA, everytime the rpmA output shows a falling edge*/
 void countFallingEdgesA() {
   edgesA++;
 }
+
+/*Increases global variable, edgesB, everytime the rpmB output shows a falling edge*/
 void countFallingEdgesB() {
   edgesB++;
 }
 
-void checkLineSensors() {
-  if (state == MOVING_LEFT && LINE_BOT_LEFT_PIN < IR_THRESHOLD) {
-    spinRobotRight();
-    state = TURNING_RIGHT;
-    turnTimer.begin(moveForwardLeft, TURN_TIME);
-  } else if (state == MOVING_RIGHT && LINE_BOT_RIGHT_PIN < IR_THRESHOLD) {
-    spinRobotLeft();
-    state = TURNING_LEFT;
-    turnTimer.begin(moveForwardRight, TURN_TIME);
-  } else if (state == PUSHING && LINE_BOT_RIGHT_PIN < IR_THRESHOLD) {
-    spinRobotRight();
-    state = TURNING_RIGHT;
-    turnTimer.begin(pushRightWall, TURN_TIME);
-  } else if (state == MOVING_LEFT && LINE_TOP_LEFT_PIN < IR_THRESHOLD) {
-    spinRobotLeft();
-    state = TURNING_LEFT;
-    turnTimer.begin(moveForwardLeft, TURN_TIME);
-  } else if (state == MOVING_RIGHT && LINE_TOP_RIGHT_PIN < IR_THRESHOLD) {
-    spinRobotRight();
-    state = TURNING_RIGHT;
-    turnTimer.begin(moveForwardRight, TURN_TIME);
-  } else if (state == PUSHING && LINE_TOP_RIGHT_PIN < IR_THRESHOLD) {
-    spinRobotRight();
-    state = TURNING_RIGHT;
-    turnTimer.begin(pushRightWall, TURN_TIME);
-  }
-}
  
 
